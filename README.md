@@ -2,7 +2,11 @@
 
 ## Introducion
 
-TODO: Link video and talk about the three alternatives
+Let's follow instructions from the webinar *Getting Started With the Official Airflow Helm Chart*: https://www.youtube.com/watch?v=39k2Sz9jZ2c
+
+Then, we can follow the official documentation of the Apache Airflow Helm Chart:
+* [Quick start with kind](https://airflow.apache.org/docs/helm-chart/stable/quick-start.html)
+* [Manage DAGs files](https://airflow.apache.org/docs/helm-chart/stable/manage-dags-files.html)
 
 Currently there are at least 3 helm charts:
 
@@ -27,9 +31,12 @@ It comes with a [great documentation](https://airflow.apache.org/docs/helm-chart
 
 ## Configure cluster
 
-Prerequisites: docker, docker-compose, kubectl, helm... and kind
+Prerequisites: docker, docker-compose, kubectl, helm... and kind.
 
-Let's follow these steps to install Kind:
+Note: useful link at https://kubernetes.io/docs/reference/kubectl/cheatsheet/ 
+
+Let's follow these steps to install [Kind](https://kind.sigs.k8s.io/):
+(Note: at the end I found useful this link: https://iximiuz.com/en/posts/kubernetes-kind-load-docker-image/ )
 ```
 $ go get sigs.k8s.io/kind@v0.11.0
 
@@ -222,7 +229,123 @@ Now go to http://localhost:8080 with **user/password** *admin/admin*
 
 ### Configure airflow
 
+Let's update airflow to version 2.1.0
+
 ```
 $ helm show values apache-airflow/airflow > values.yaml
+```
+
+Now edit:
+· defaultAirflowTag to 2.1.0
+· airflowVersion to 2.1.0
+· executor to KubernetesExecutor
+
+We'll also add a config map:
+· extraEnvFrom <- see new values
+
+We need to create this config map in K8s, we'll use variables.yaml for it.
+
+```
+$ kubectl apply -f variables.yaml 
+configmap/airflow-variables created
+
+$ kubectl get configmap -n airflow
+NAME                     DATA   AGE
+airflow-airflow-config   1      3h26m
+airflow-variables        1      36s
+kube-root-ca.crt         1      4h31m
+```
+
+Now, let's upgrade airflow
+```
+$ helm ls -n airflow
+NAME    NAMESPACE       REVISION        UPDATED                                         STATUS          CHART             APP VERSION
+airflow airflow         1               2021-07-02 13:44:55.554129864 +0200 CEST        deployed        airflow-1.0.0     2.0.2      
+
+$ helm upgrade --install airflow apache-airflow/airflow --namespace airflow -f values.yaml --debug --timeout 30m0s
+...
+NOTES:
+Thank you for installing Apache Airflow 2.1.0!
+
+Your release is named airflow.
+You can now access your dashboard(s) by executing the following command(s) and visiting the corresponding port at localhost in your browser:
+
+Airflow Webserver:     kubectl port-forward svc/airflow-webserver 8080:8080 --namespace airflow
+Default Webserver (Airflow UI) Login credentials:
+    username: admin
+    password: admin
+Default Postgres connection credentials:
+    username: postgres
+    password: postgres
+    port: 5432
+
+You can get Fernet Key value by running the following:
+
+    echo Fernet Key: $(kubectl get secret --namespace airflow airflow-fernet-key -o jsonpath="{.data.fernet-key}" | base64 --decode)
+
+$ helm ls -n airflow
+NAME    NAMESPACE       REVISION        UPDATED                                         STATUS          CHART             APP VERSION
+airflow airflow         2               2021-07-02 17:20:23.126990423 +0200 CEST        deployed        airflow-1.0.0     2.0.2      
+
+$ kubectl get po -n airflow
+NAME                                 READY   STATUS    RESTARTS   AGE
+airflow-postgresql-0                 1/1     Running   0          3h54m
+airflow-scheduler-5797df5d6f-mt9rn   2/2     Running   0          1m
+airflow-statsd-7586f9998-kbp8m       1/1     Running   0          3h54m
+airflow-webserver-7d49bc9c68-cwhx4   1/1     Running   0          1m
+```
+
+Let's access the UI. In another terminal:
+```
+$ kubectl port-forward svc/airflow-webserver 8080:8080 -n airflow
+Forwarding from 127.0.0.1:8080 -> 8080
+Forwarding from [::1]:8080 -> 8080
+```
+
+Go to http://localhost:8080 with admin/admin
+
+Let's also verify the config map variable (actually, an airflow variable)
+```
+$ kubectl get po -n airflow
+NAME                                 READY   STATUS    RESTARTS   AGE
+airflow-postgresql-0                 1/1     Running   0          3h54m
+airflow-scheduler-5797df5d6f-mt9rn   2/2     Running   0          1m
+airflow-statsd-7586f9998-kbp8m       1/1     Running   0          3h54m
+airflow-webserver-7d49bc9c68-cwhx4   1/1     Running   0          1m
+
+$ kubectl exec --stdin --tty airflow-webserver-7d49bc9c68-cwhx4 -n airflow -- /bin/bash
+Defaulted container "webserver" out of: webserver, wait-for-airflow-migrations (init)
+airflow@airflow-webserver-7d49bc9c68-cwhx4:/opt/airflow$ python
+Python 3.6.13 (default, May 12 2021, 16:48:24) 
+[GCC 8.3.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from airflow.models import Variable
+>>> Variable.get("my_s3_bucket")
+'my_s3_name'
+>>> exit()
+airflow@airflow-webserver-7d49bc9c68-cwhx4:/opt/airflow$ exit
+exit
+$
+
+```
+
+## Next steps
+
+Custom image with your dependencies and DAGs.
+
+Load the mage in Kind: https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster.
+
+Follow https://airflow.apache.org/docs/helm-chart/stable/quick-start.html
+
+## For the time being, let's finish it
+
+```
+$ kind get clusters
+airflow-cluster
+
+$ kind delete cluster --name airflow-cluster
+
+$ kind get clusters
+No kind clusters found.
 ```
 
